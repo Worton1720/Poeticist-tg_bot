@@ -1,49 +1,56 @@
 import os
 import logging
 import asyncio
+import json
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
-import openai
+from gptFree import generate_response  # Импортируем функцию из gptFree.py
+from dotenv import load_dotenv
 
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
-openai.api_key = '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'
-dp = Dispatcher(Bot("6111409589:AAFP5sGZl-sJ_0yOGYBgvGWEhXGYmLGWBvc"))
+# Инициализация бота и диспетчера
+bot = Bot(token=os.getenv('API_TOKEN'))
+dp = Dispatcher(bot)
 
-if not openai.api_key:
-    logging.error("OpenAI API key not found in environment variable")
+# Функция для сохранения имени и стиха в JSON файл
+async def save_name_to_file(name: str, poem: str):
+    try:
+        # Читаем существующие данные из файла
+        if os.path.exists("names.json"):
+            with open("names.json", "r", encoding="utf-8") as file:
+                names = json.load(file)
+        else:
+            names = {}
 
+        # Добавляем новое имя и стих в начало словаря
+        names[name] = poem
+
+        # Сохраняем обновленный словарь обратно в файл
+        with open("names.json", "w", encoding="utf-8") as file:
+            json.dump(names, file, ensure_ascii=False, indent=4)
+    except Exception as e:
+        logging.error(f"Failed to save name and poem to file: {e}")
 
 async def generate_poem(name: str) -> str:
-    prompt = (
-        f'Создайте стихотворение на русском языке для человеческого имени "{name}" в 4 строчки. Стихотворение должно быть написано в стиле классической поэзии и следовать рифме "АБАБ". \n',
-        "Стихотворение должно быть длиной [не больше 4 строчек], следуя рифме. \n",
-        "Красиво оформленный, без ненужных абзацев.",
-    )
+    prompt = [
+        {"role": "system", "content": f'Ты - классический русский поэт. Напиши четверостишье о человеке по имени [{name}]. Включи в стихотворение его характерные черты, увлечения и мечты. Стихотворение должно быть написано в рифмованном стиле и состоять из одного четверостишья. Используй яркие образы и метафоры, чтобы передать атмосферу и чувства, связанные с этим именем.'},
+    ]
 
     try:
-        response = await asyncio.to_thread(
-            openai.Completion.create,
-            engine="text-davinci-003",
-            prompt=prompt,
-            max_tokens=250,
-            n=1,
-            stop=None,
-            temperature=0.5,
-        )
-        poem = response["choices"][0]["text"]
+        # Используем функцию generate_response для получения ответа
+        poem = await generate_response(prompt)
     except Exception as e:
         logging.error(f"Failed to generate poem for {name}: {e}")
         poem = "Произошла ошибка при генерации стихотворения."
 
     return poem
 
-
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     await message.answer("Введите ваше имя.")
-
 
 @dp.message_handler()
 async def send(message: types.Message):
@@ -53,9 +60,13 @@ async def send(message: types.Message):
         await message.answer("Пожалуйста, введите ваше имя.")
         return
 
+    # Генерируем стих для имени
     poem = await generate_poem(name)
+
+    # Сохраняем имя и стих в файл
+    await save_name_to_file(name, poem)
+
     await message.answer(poem)
 
-
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(executor.start_polling(dp, skip_updates=True))
